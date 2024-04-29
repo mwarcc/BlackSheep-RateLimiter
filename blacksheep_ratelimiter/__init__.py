@@ -1,182 +1,89 @@
-from typing import Callable, List
 from functools import wraps
-from collections import defaultdict
 from datetime import datetime, timedelta
+from blacksheep import Application, Request, Response, Content
 from blacksheep.server.responses import json
-from blacksheep.server import application
-from blacksheep import Request
+from collections import defaultdict
+import json as json_module
 import re
 
-blacklisted_ips: List[str] = []
-whitelisted_ips: List[str] = []
 
-def add_blacklist(ips: List[str]):
-    """
-    Add IP addresses to the blacklist.
-    
-    Args:
-        ips (list): List of IP addresses to be added to the blacklist.
-    """
-    global blacklisted_ips
-    blacklisted_ips.extend(ips)
 
-def add_whitelist(ips: List[str]):
-    """
-    Add IP addresses to the whitelist.
-    
-    Args:
-        ips (list): List of IP addresses to be added to the whitelist.
-    """
-    global whitelisted_ips
-    whitelisted_ips.extend(ips)
+def rate_limit(limit: int, per: timedelta, custom_ratelimit_response=None):
+    storage = defaultdict(lambda: {"count": 0, "reset_time": None})
 
-def allow_environment():
-    """
-    Allow local IP addresses based on environment.
-    """
-    local_ips = ["127.0.0.1", "::1", ":1"]
-    add_whitelist(local_ips)
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(app: Application, request: Request) -> Response:
+            remote_addr = request.client_ip
+            now = datetime.utcnow()
 
-def rate_limiter(limit: int, window: timedelta, custom_ratelimit_response: Callable = None, custom_blacklisted_response: Callable = None) -> Callable:
-    """
-    A decorator function to limit the rate of incoming requests to a given API endpoint.
+            if storage[remote_addr]["reset_time"] is None or now > storage[remote_addr]["reset_time"]:
+                storage[remote_addr] = {"count": 1, "reset_time": now + per}
+                remaining_seconds = per.total_seconds()
+            else:
+                remaining_seconds = (storage[remote_addr]["reset_time"] - now).total_seconds()
+                storage[remote_addr]["count"] += 1
 
-    Args:
-        limit (int): The maximum number of requests allowed within the specified window.
-        window (timedelta): The time window within which the requests are counted.
-        custom_response (Callable): A custom response function to be called when the rate limit is exceeded.
+            response = None
+            if storage[remote_addr]["count"] > limit:
+                response = custom_ratelimit_response(request) if custom_ratelimit_response else json({"error": "Rate limit exceeded"}, status=429)
+            else:
+                response = await func(app, request)
 
-    Returns:
-        Callable: The decorator function.
+            response.headers.add(b"X-RateLimit-Remaining", str(int(remaining_seconds)).encode())
+            return response
 
-    Example:
-        @server.router.get("/example")
-        @rate_limiter(limit=10, window=timedelta(minutes=1), custom_response=None)
-        async def example_handler(request: Request):
-            return json({"message": "Hello, World!"})
-    """
-    request_counts = defaultdict(list)
-    
-    def decorator(handler: Callable) -> Callable:
-        @wraps(handler)
-        async def wrapped(request: Request, *args, **kwargs):
-            global blacklisted_ips
-            ip_address = request.client_ip
+        return wrapper
 
-            if ip_address in whitelisted_ips:
-                return await handler(request, *args, **kwargs)
-
-            if ip_address in blacklisted_ips:
-                if custom_blacklisted_response:
-                    return await custom_blacklisted_response(request)
-                
-                return json(data={
-                    "status": 403, "description": "Forbidden"
-                }, status=403)
-
-            current_time = datetime.now()
-            request_counts[ip_address] = [timestamp for timestamp in request_counts[ip_address] if current_time - timestamp <= window]
-
-            if len(request_counts[ip_address]) >= limit:
-                if custom_ratelimit_response:
-                    return await custom_ratelimit_response(request)
-                else:
-                    retry_after = int((request_counts[ip_address][0] + window - current_time).total_seconds() if request_counts[ip_address] else 0)
-                    return json({
-                        "error": "Rate limit exceeded", "message": "You have exceeded the rate limit. Please try again later.",
-                        "retry_after": retry_after
-                    }, status=429)
-            
-            request_counts[ip_address].append(current_time)
-            return await handler(request, *args, **kwargs)
-        
-        return wrapped
-    
     return decorator
 
 
-def rate_limiter_with_header(limit: int, window: timedelta, header_name: str, require_not_empty: bool = False, header_value_regex: str = None, custom_ratelimit_response: Callable = None, custom_blacklisted_response: Callable = None, custom_empty_header_response: Callable = None, custom_invalid_value_response: Callable = None) -> Callable:
-    """
-    A decorator function to limit the rate of incoming requests to a given API endpoint based on a specific header.
+def rate_limit_with_header(limit: int, per: timedelta, header_name: str, header_value_regex=None, custom_ratelimit_response=None, custom_header_missing_response=None, custom_header_value_mismatch_response=None):
+    storage = defaultdict(lambda: {"count": 0, "reset_time": None})
 
-    Args:
-        limit (int): The maximum number of requests allowed within the specified window.
-        window (timedelta): The time window within which the requests are counted.
-        header_name (str): The name of the header to check for rate limiting.
-        require_not_empty (bool): Whether the header value must not be empty.
-        header_value_regex (str): Regex pattern to match against the header value.
-        custom_ratelimit_response (Callable): A custom response function to be called when the rate limit is exceeded.
-        custom_blacklisted_response (Callable): A custom response function to be called when the IP address is blacklisted.
-        custom_empty_header_response (Callable): A custom response function to be called when the header is empty.
-        custom_invalid_value_response (Callable): A custom response function to be called when the header value is invalid.
-
-    Returns:
-        Callable: The decorator function.
-    """
-    request_counts = defaultdict(list)
-    
-    header_name_bytes = header_name.encode('utf-8')
-    
-    def decorator(handler: Callable) -> Callable:
-        @wraps(handler)
-        async def wrapped(request: Request, *args, **kwargs):
-            ip_address = request.client_ip
-
-            if ip_address in whitelisted_ips:
-                return await handler(request, *args, **kwargs)
-
-            if ip_address in blacklisted_ips:
-                if custom_blacklisted_response:
-                    return await custom_blacklisted_response(request)
-                
-                return json({"status": 403, "description": "Forbidden"}, status=403)
-
-            current_time = datetime.now()
-
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(app: Application, request: Request) -> Response:
+            header_name_bytes = header_name.encode('utf-8')
             header_value_tuple = request.headers.get(header_name_bytes)
             header_value = header_value_tuple[0] if header_value_tuple else None
-            
-            if header_value is not None:
-                header_value = header_value.decode('utf-8')
+
+            if header_value is None or header_value == "" or header_value == '':
+                if custom_header_missing_response is not None:
+                    return await custom_header_missing_response(request)
                 
-                if require_not_empty and not header_value.strip():
-                    if custom_empty_header_response:
-                        return await custom_empty_header_response(request)
-                    else:
-                        return json({"error": "Header value cannot be empty"}, status=400)
+                if custom_ratelimit_response is not None:
+                    return await custom_ratelimit_response(request)
+                
+                return json({"error": "Header value is missing"}, status=400)
 
-                if header_value_regex and not re.match(header_value_regex, header_value):
-                    if custom_invalid_value_response:
-                        return await custom_invalid_value_response(request)
-                    else:
-                        return json({"error": "Invalid header value"}, status=400)
+            if header_value_regex is not None:
+                header_value_regex_bytes = header_value_regex.encode('utf-8')
 
-                request_counts[(ip_address, header_value)] = [
-                    timestamp for timestamp in request_counts[(ip_address, header_value)]
-                    if current_time - timestamp <= window
-                ]
+                if not re.match(header_value_regex_bytes, header_value):
+                    if custom_header_value_mismatch_response is not None:
+                        return await custom_header_value_mismatch_response(request)
+                    
+                    return json({"error": "Header value does not match required pattern"}, status=400)
 
-                if len(request_counts[(ip_address, header_value)]) >= limit:
-                    if custom_ratelimit_response:
-                        return await custom_ratelimit_response(request)
-                    else:
-                        retry_after = int(
-                            (request_counts[(ip_address, header_value)][0] + window - current_time).total_seconds()
-                            if request_counts[(ip_address, header_value)]
-                            else 0
-                        )
-                        return json({
-                            "error": "Rate limit exceeded", 
-                            "message": "You have exceeded the rate limit. Please try again later.",
-                            "retry_after": retry_after
-                        }, status=429)
-            
-                request_counts[(ip_address, header_value)].append(current_time)
+            remote_addr = f"{request.client_ip}-{header_value}"
+            now = datetime.utcnow()
+
+            if storage[remote_addr]["reset_time"] is None or now > storage[remote_addr]["reset_time"]:
+                storage[remote_addr] = {"count": 1, "reset_time": now + per}
+                remaining_seconds = per.total_seconds()
             else:
-                pass
+                remaining_seconds = (storage[remote_addr]["reset_time"] - now).total_seconds()
+                storage[remote_addr]["count"] += 1
 
-            return await handler(request, *args, **kwargs)
-        
-        return wrapped
-    
+            if storage[remote_addr]["count"] > limit:
+                response = custom_ratelimit_response(request) if custom_ratelimit_response else json({"error": "Rate limit exceeded"}, status=429)
+                response.headers.add(b"X-RateLimit-Remaining", str(int(remaining_seconds)).encode())
+            else:
+                response = await func(app, request)
+             
+            return response
+
+        return wrapper
+
     return decorator
