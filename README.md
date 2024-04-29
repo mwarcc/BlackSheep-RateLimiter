@@ -31,4 +31,6 @@ Now, specify the 'custom_ratelimit_response' parameter in the decorator calling 
 
 ```python
 @blacksheep_ratelimiter.rate_limiter(custom_ratelimit_response=custom_response)
+async def home(request: Request):
+   ...
 ```
