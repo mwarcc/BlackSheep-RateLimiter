@@ -30,7 +30,7 @@ async def custom_response(request: Request):
 Now, specify the 'custom_ratelimit_response' parameter in the decorator calling the function.
 
 ```python
-@blacksheep_ratelimiter.rate_limiter(custom_ratelimit_response=custom_response)
+@blacksheep_ratelimiter.rate_limit(custom_ratelimit_response=custom_response)
 ```
 
 # Allow local IP addresses and Blacklist IPs (Deketed for now)
