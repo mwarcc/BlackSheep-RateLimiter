@@ -33,7 +33,7 @@ Now, specify the 'custom_ratelimit_response' parameter in the decorator calling 
 @blacksheep_ratelimiter.rate_limit(custom_ratelimit_response=custom_response)
 ```
 
-# Allow local IP addresses and Blacklist IPs (Deketed for now)
+# Allow local IP addresses and Blacklist IPs (Deleted for now)
 You can allow environment and blacklist IPS this way:
 ```python
 @app.on_start
