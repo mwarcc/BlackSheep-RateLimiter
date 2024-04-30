@@ -19,7 +19,7 @@ Here's how you can apply rate limiting to a router using BlackSheep-RateLimiter.
 async def home(request: Request):
     return Response(200, content=Content(b"text/plain", b"Hello, World!"))
 ```
-Here's how you can apply rate limiting to a rheaderr using BlackSheep-RateLimiter. In this example, we're setting a rate limit of 10 requests per minute for the '/' route. *header_value_regex*=r'^Bearer\s.*' specifies that the header value must start with 'Bearer' followed by a space and any characters.
+Here's how you can apply rate limiting to a header using BlackSheep-RateLimiter. In this example, we're setting a rate limit of 10 requests per minute for the '/' route. *header_value_regex*=r'^Bearer\s.*' specifies that the header value must start with 'Bearer' followed by a space and any characters.
 
 # Return own API responses
 You can return your own respones (html, json, Response..) by creating a function that will return the response.
@@ -41,4 +41,4 @@ async def startup():
     blacksheep_ratelimiter.allow_environment()
     blacksheep_ratelimiter.add_blacklist(ips=["IPS"])
 ```
-You can return own API responses aswell using 'custom_blacklisted_response'.
+You can return own API responses using 'custom_blacklisted_response'.
