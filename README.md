@@ -33,12 +33,12 @@ Now, specify the 'custom_ratelimit_response' parameter in the decorator calling 
 @blacksheep_ratelimiter.rate_limit(custom_ratelimit_response=custom_response)
 ```
 
-# Allow local IP addresses and Blacklist IPs (Deleted for now)
-You can allow environment and blacklist IPS this way:
+# New: dynamic ratelimiter
+You can now add dynamic ratelimiter (max rps):
 ```python
-@app.on_start
-async def startup():
-    blacksheep_ratelimiter.allow_environment()
-    blacksheep_ratelimiter.add_blacklist(ips=["IPS"])
+@app.router.get('/')
+@dynamic_rate_limit(max_requests=1, per_seconds=5)
+async def home(app, request):
+   ...
 ```
-You can return own API responses using 'custom_blacklisted_response'.
+
