@@ -5,6 +5,7 @@ from blacksheep.server.responses import json
 from collections import defaultdict
 import json as json_module
 import re
+from typing import Callable, Optional
 
 
 
@@ -82,6 +83,52 @@ def rate_limit_with_header(limit: int, per: timedelta, header_name: str, header_
             else:
                 response = await func(app, request)
              
+            return response
+
+        return wrapper
+
+    return decorator
+
+def dynamic_rate_limit(
+    max_requests: int,
+    per_seconds: int,
+    custom_ratelimit_response: Optional[Callable] = None,
+):
+    storage = defaultdict(lambda: {"requests": [], "reset_time": None})
+
+    def decorator(handler: Callable):
+        @wraps(handler)
+        async def wrapper(app: Application, request: Request) -> Response:
+            ip = request.client_ip
+
+            now = datetime.now()
+
+            storage[ip]["requests"] = [
+                (ts, count)
+                for ts, count in storage[ip]["requests"]
+                if now - ts <= timedelta(seconds=per_seconds)
+            ]
+
+            if len(storage[ip]["requests"]) >= max_requests:
+                remaining_time = per_seconds - (now - storage[ip]["requests"][0][0]).total_seconds()
+
+                if custom_ratelimit_response:
+                    response = custom_ratelimit_response(request)
+                else:
+                    error_message = {"error": "Rate limit exceeded"}
+                    response = Response(
+                        status=429,
+                        content=Content(b"application/json", json_module.dumps(error_message).encode()),
+                    )
+                    response.headers[b"Retry-After"] = str(int(remaining_time)).encode('utf-8')
+                return response
+
+            if storage[ip]["reset_time"] is None or now > storage[ip]["reset_time"]:
+                storage[ip] = {"requests": [(now, 1)], "reset_time": now + timedelta(seconds=per_seconds)}
+            else:
+                storage[ip]["requests"].append((now, len(storage[ip]["requests"]) + 1))
+
+            response = await handler(app, request)
             return response
 
         return wrapper
