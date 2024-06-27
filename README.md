@@ -55,5 +55,5 @@ async def custom_response(application: Application, request: Request):
 # Running the Application
 Since this is a middleware for a Blacksheep application, it can't be started by simply double-clicking the file. Use a command like the following to run your Blacksheep application:
 ```bash
-uvicorn your_module_name:app --reload
+uvicorn your_module_name:app --reload --workers {workers}
 ```
