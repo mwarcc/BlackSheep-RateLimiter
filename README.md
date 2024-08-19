@@ -18,7 +18,7 @@ This example shows how to limit requests to an endpoint to a maximum of 5 reques
 ```python
 @app.router.get('/')
 @rate_limit(limit=5, per=timedelta(minutes=1))
-async def test(application: Application, request: Request):
+async def test(request: Request):
     return json({'success': True})
 ```
 
