@@ -7,14 +7,12 @@ import json as json_module
 import re
 from typing import Callable, Optional
 
-#toputthisontoplol
-
-def rate_limit(limit: int, per: timedelta, custom_ratelimit_response=None):
+def rate_limit(limit: int, per: timedelta, custom_ratelimit_response: Optional[Callable[[Request], Response]] = None):
     storage = defaultdict(lambda: {"count": 0, "reset_time": None})
 
     def decorator(func):
         @wraps(func)
-        async def wrapper(app: Application, request: Request) -> Response:
+        async def wrapper(request: Request) -> Response:
             remote_addr = request.client_ip
             now = datetime.utcnow()
 
@@ -25,16 +23,18 @@ def rate_limit(limit: int, per: timedelta, custom_ratelimit_response=None):
                 remaining_seconds = (storage[remote_addr]["reset_time"] - now).total_seconds()
                 storage[remote_addr]["count"] += 1
 
-            response = None
             if storage[remote_addr]["count"] > limit:
-                response = custom_ratelimit_response(request) if custom_ratelimit_response else json({"error": "Rate limit exceeded"}, status=429)
-            else:
-                response = await func(app, request)
-
+                if custom_ratelimit_response:
+                    return await custom_ratelimit_response(request)
+                return json({"error": "Rate limit exceeded"}, status=429)
+            
+            response = await func(request)
             response.headers.add(b"X-RateLimit-Remaining", str(int(remaining_seconds)).encode())
             return response
 
         return wrapper
+
+    return decorator
 
     return decorator
 
